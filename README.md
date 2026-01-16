@@ -16,7 +16,8 @@ Create disposable notes, share via short URLs, and optionally lock with a one-ti
 
 ## Photo
 
-![Main Page](readme-imgs/demo1.png){width=50%}![Cheat Sheet](readme-imgs/demo2.png){width=50%}
+![Main Page](readme-imgs/demo1.png)
+![Cheat Sheet](readme-imgs/demo2.png)
 
 ---
 
