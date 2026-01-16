@@ -14,7 +14,7 @@ import { sql } from 'kysely';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
-const PORT = Number(process.env.PORT ?? 3003);
+const PORT = Number(process.env.PORT ?? 3123);
 const SQLITE_PATH = process.env.SQLITE_PATH ?? './data/app.db';
 const APP_BASE_URL = process.env.APP_BASE_URL ?? '';
 const MAX_DOC_BYTES = Number(process.env.MAX_DOC_BYTES ?? 120_000);

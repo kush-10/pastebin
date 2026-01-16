@@ -22,7 +22,7 @@ npm run dev
 ```
 
 Frontend: `http://localhost:5173`
-Backend: `http://localhost:3003`
+Backend: `http://localhost:3123`
 
 ### Docker (production)
 
@@ -65,7 +65,7 @@ Auth model A: anyone with the link can edit unless a password is set. If a passw
 
 - `APP_BASE_URL` (required for QR correctness behind proxies)
 - `SQLITE_PATH` (default `./data/app.db`)
-- `PORT` (default `3003`)
+- `PORT` (default `3123`)
 - `MAX_DOC_BYTES` (default `120000`)
 - `RATE_LIMIT_MAX` (default `30`)
 - `RATE_LIMIT_WINDOW_MS` (default `60000`)
