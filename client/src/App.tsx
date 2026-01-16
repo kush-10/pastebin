@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { EditorContent, useEditor } from '@tiptap/react';
+import toast, { Toaster } from 'react-hot-toast';
 import StarterKit from '@tiptap/starter-kit';
 import Placeholder from '@tiptap/extension-placeholder';
 import Link from '@tiptap/extension-link';
@@ -333,6 +334,7 @@ const App = () => {
     if (!docId) return;
     const url = getPublicUrl(docId);
     await navigator.clipboard.writeText(url);
+    toast.success('Link copied', { duration: 1400 });
   }, [docId, getPublicUrl]);
 
   const openLinkModal = useCallback(() => {
@@ -587,6 +589,30 @@ const App = () => {
         items={menuItems}
         qrDataUrl={qrDataUrl}
         onClose={() => setMenuOpen(false)}
+      />
+      <Toaster
+        position="top-right"
+        toastOptions={{
+          duration: 1400,
+          style: {
+            background: 'rgba(20, 20, 20, 0.92)',
+            color: '#d7d7d7',
+            border: '1px solid rgba(255, 255, 255, 0.08)',
+            borderRadius: '999px',
+            boxShadow: '0 12px 30px rgba(0, 0, 0, 0.4)',
+            backdropFilter: 'blur(10px)',
+            padding: '8px 14px',
+            fontSize: '0.7rem',
+            letterSpacing: '0.12em',
+            textTransform: 'uppercase'
+          },
+          success: {
+            iconTheme: {
+              primary: '#a3f2c2',
+              secondary: '#0f1513'
+            }
+          }
+        }}
       />
 
       <PasswordModal
