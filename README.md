@@ -2,7 +2,9 @@
 
 ![TypeScript](https://img.shields.io/badge/TypeScript-3178C6?logo=typescript&logoColor=white) ![React](https://img.shields.io/badge/React-20232A?logo=react&logoColor=61DAFB) ![Vite](https://img.shields.io/badge/Vite-646CFF?logo=vite&logoColor=FFD62E) ![Node.js](https://img.shields.io/badge/Node.js-43853D?logo=node.js&logoColor=white) ![SQLite](https://img.shields.io/badge/SQLite-003B57?logo=sqlite&logoColor=white)
 
-Super-minimal, black-canvas paste app inspired by [textarea](https://github.com/antonmedv/textarea) and [pastebin](https://pastebin.com). Documents are stored server-side and shared via short URLs like `/d/<id>`.
+Super-minimal, black-canvas paste app inspired by [textarea](https://github.com/antonmedv/textarea)(for the text editor) and [pastebin](https://pastebin.com)(for the concept and features). Documents are stored server-side and shared via short URLs like `/d/<id>`.
+
+A [link](https://pastebin.kush.al/d/rx-FMLt-) with all markdown types supported being shown (same as in images below)
 
 ---
 
@@ -14,8 +16,7 @@ Create disposable notes, share via short URLs, and optionally lock with a one-ti
 
 ## Photo
 
-![Main Page](readme-imgs/demo-1.png){width=50%}
-![Cheat Sheet](readme-imgs/demo-2.png){width=50%}
+![Main Page](readme-imgs/demo1.png){width=50%}![Cheat Sheet](readme-imgs/demo2.png){width=50%}
 
 ---
 
