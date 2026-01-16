@@ -5,13 +5,8 @@ services:
       dockerfile: Dockerfile
     ports:
       - "3123:3123"
-    environment:
-      APP_BASE_URL: "http://localhost:3123"
-      SQLITE_PATH: "/data/app.db"
-      RATE_LIMIT_MAX: "30"
-      RATE_LIMIT_WINDOW_MS: "60000"
-      MAX_DOC_BYTES: "120000"
-      CLEANUP_INTERVAL_MINUTES: "10"
+    env_file:
+      - .env
     volumes:
       - app-data:/data
     restart: unless-stopped

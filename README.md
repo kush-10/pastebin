@@ -29,6 +29,7 @@ Backend: `http://localhost:3123`
 ```
 docker compose up --build
 ```
+Copy `.env.example` to `.env` and update `APP_BASE_URL`/`PORT` before running.
 
 ### Docker (development)
 
