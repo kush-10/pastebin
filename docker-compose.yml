@@ -4,9 +4,9 @@ services:
       context: .
       dockerfile: Dockerfile
     ports:
-      - "3000:3000"
+      - "3003:3003"
     environment:
-      APP_BASE_URL: "http://localhost:3000"
+      APP_BASE_URL: "http://localhost:3003"
       SQLITE_PATH: "/data/app.db"
       RATE_LIMIT_MAX: "30"
       RATE_LIMIT_WINDOW_MS: "60000"
