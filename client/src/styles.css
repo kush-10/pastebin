@@ -1,0 +1,141 @@
+@import "tailwindcss";
+
+:root {
+  color-scheme: dark;
+}
+
+body {
+  font-family: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono",
+    "Courier New", monospace;
+  background-color: #000;
+}
+
+.tiptap {
+  outline: none;
+  min-height: 60vh;
+}
+
+.editor-shell .tiptap {
+  font-size: calc(1rem * var(--editor-scale, 1));
+}
+
+.tiptap h1 {
+  font-size: calc(2.25rem * var(--editor-scale, 1));
+  line-height: calc(2.5rem * var(--editor-scale, 1));
+  font-weight: 500;
+}
+
+.tiptap h2 {
+  font-size: calc(1.875rem * var(--editor-scale, 1));
+  line-height: calc(2.25rem * var(--editor-scale, 1));
+  font-weight: 500;
+}
+
+.tiptap h3 {
+  font-size: calc(1.5rem * var(--editor-scale, 1));
+  line-height: calc(2rem * var(--editor-scale, 1));
+  font-weight: 500;
+}
+
+.tiptap pre {
+  background: #0a0a0a;
+  border: 1px solid #1a1a1a;
+  padding: 1.25rem 1.5rem;
+  border-radius: 0.75rem;
+  overflow-x: auto;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.02), 0 10px 30px rgba(0, 0, 0, 0.35);
+}
+
+.tiptap pre code {
+  background: transparent;
+  border: none;
+  padding: 0;
+  font-size: 0.98em;
+  line-height: 1.7;
+  color: #e9e9e9;
+  white-space: pre;
+}
+
+.tiptap blockquote {
+  border-left: 2px solid #333;
+  padding-left: 0.75rem;
+  color: #bfbfbf;
+}
+
+.tiptap ul,
+.tiptap ol {
+  padding-left: 1.25rem;
+  color: #ffffff;
+  list-style-position: outside;
+}
+
+.tiptap li > p {
+  display: inline;
+  margin: 0;
+}
+
+.tiptap ul {
+  list-style-type: disc;
+}
+
+.tiptap ol {
+  list-style-type: decimal;
+  list-style-position: inside;
+  padding-left: 0;
+}
+
+.tiptap ol ol {
+  padding-left: 1.25rem;
+}
+
+.tiptap strong {
+  font-weight: 600;
+  color: #ffffff;
+}
+
+.tiptap code {
+  background: #111;
+  border: 1px solid #222;
+  border-radius: 0.35rem;
+  padding: 0.1rem 0.35rem;
+  font-size: 0.95em;
+}
+
+.tiptap a {
+  color: #9ad0ff;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.tiptap p.is-editor-empty:first-child::before {
+  content: attr(data-placeholder);
+  color: #4b4b4b;
+  pointer-events: none;
+  float: left;
+  height: 0;
+}
+
+.text-scale-slider {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.35rem 0.6rem;
+  border-radius: 999px;
+  background: rgba(20, 20, 20, 0.72);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.35);
+  backdrop-filter: blur(10px);
+}
+
+.text-scale-value {
+  min-width: 3rem;
+  text-align: center;
+  font-size: 0.65rem;
+  letter-spacing: 0.08em;
+  color: #cfcfcf;
+}
+
+.text-scale-input {
+  width: 90px;
+  accent-color: #9a9a9a;
+}

@@ -1,0 +1,55 @@
+{
+  "name": "minimal-doc-paste",
+  "private": true,
+  "type": "module",
+  "version": "0.1.0",
+  "engines": {
+    "node": "24.13.0",
+    "npm": "11.7.0"
+  },
+  "scripts": {
+    "dev": "concurrently -k \"npm:dev:server\" \"npm:dev:client\"",
+    "dev:server": "tsx watch server/src/index.ts",
+    "dev:client": "vite --config client/vite.config.ts",
+    "build": "npm run build:client && npm run build:server",
+    "build:client": "vite build --config client/vite.config.ts",
+    "build:server": "tsc -p server/tsconfig.json",
+    "start": "node dist/server/index.js",
+    "versions": "node scripts/versions.js"
+  },
+  "dependencies": {
+    "@fastify/cors": "11.2.0",
+    "@fastify/helmet": "13.0.2",
+    "@fastify/rate-limit": "10.3.0",
+    "@fastify/static": "9.0.0",
+    "@tiptap/core": "3.15.3",
+    "@tiptap/extension-link": "3.15.3",
+    "@tiptap/extension-placeholder": "3.15.3",
+    "@tiptap/react": "3.15.3",
+    "@tiptap/starter-kit": "3.15.3",
+    "argon2": "0.44.0",
+    "better-sqlite3": "12.6.0",
+    "fastify": "5.7.0",
+    "kysely": "0.28.9",
+    "nanoid": "5.1.6",
+    "qrcode": "1.5.4",
+    "react": "19.2.3",
+    "react-dom": "19.2.3"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "4.1.18",
+    "@types/better-sqlite3": "7.6.13",
+    "@types/node": "25.0.9",
+    "@types/qrcode": "^1.5.6",
+    "@types/react": "19.2.8",
+    "@types/react-dom": "19.2.3",
+    "@vitejs/plugin-react": "5.1.2",
+    "autoprefixer": "10.4.23",
+    "concurrently": "9.2.1",
+    "postcss": "8.5.6",
+    "tailwindcss": "4.1.18",
+    "tsx": "4.21.0",
+    "typescript": "5.9.3",
+    "vite": "7.3.1"
+  }
+}
