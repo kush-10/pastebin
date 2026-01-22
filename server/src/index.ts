@@ -1,11 +1,13 @@
-import Fastify, { type FastifyRequest } from 'fastify';
+import Fastify, { type FastifyReply, type FastifyRequest } from 'fastify';
 import helmet from '@fastify/helmet';
 import cors from '@fastify/cors';
 import rateLimit from '@fastify/rate-limit';
 import fastifyStatic from '@fastify/static';
+import cookie from '@fastify/cookie';
 import { createDb, initDb } from './db.js';
 import { nanoid } from 'nanoid';
 import argon2 from 'argon2';
+import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { readFile } from 'node:fs/promises';
@@ -22,6 +24,10 @@ const RATE_LIMIT_MAX = Number(process.env.RATE_LIMIT_MAX ?? 30);
 const RATE_LIMIT_WINDOW_MS = Number(process.env.RATE_LIMIT_WINDOW_MS ?? 60_000);
 const CLEANUP_INTERVAL_MINUTES = Number(process.env.CLEANUP_INTERVAL_MINUTES ?? 10);
 const HSTS_ENABLED = process.env.HSTS_ENABLED === 'true';
+const SESSION_TTL_MS = Number(process.env.SESSION_TTL_MS ?? 7 * 24 * 60 * 60 * 1000);
+const AUTH_COOKIE_NAME = 'pb_session';
+const AUTH_SECRET = process.env.AUTH_SECRET ?? randomBytes(32).toString('hex');
+const IS_PROD = process.env.NODE_ENV === 'production';
 
 const fastify = Fastify({
   logger: true,
@@ -60,6 +66,7 @@ if (process.env.NODE_ENV !== 'production') {
 }
 
 await fastify.register(rateLimit, { global: false });
+await fastify.register(cookie);
 
 fastify.addHook('onRequest', (request, reply, done) => {
   if (request.url.startsWith('/d/')) {
@@ -95,9 +102,208 @@ const baseUrl = () => {
   return APP_BASE_URL || '';
 };
 
+const base64UrlEncode = (value: string) => Buffer.from(value).toString('base64url');
+const base64UrlDecode = (value: string) => Buffer.from(value, 'base64url').toString('utf8');
+
+const signValue = (value: string) =>
+  createHmac('sha256', AUTH_SECRET).update(value).digest('base64url');
+
+const buildSessionCookie = (userId: number) => {
+  const payload = base64UrlEncode(JSON.stringify({ userId, iat: Date.now() }));
+  const signature = signValue(payload);
+  return `${payload}.${signature}`;
+};
+
+const verifySessionCookie = (value: string) => {
+  const [payload, signature] = value.split('.');
+  if (!payload || !signature) return null;
+  const expected = signValue(payload);
+  const signatureBuf = Buffer.from(signature);
+  const expectedBuf = Buffer.from(expected);
+  if (signatureBuf.length !== expectedBuf.length) return null;
+  if (!timingSafeEqual(signatureBuf, expectedBuf)) return null;
+  try {
+    const decoded = JSON.parse(base64UrlDecode(payload)) as { userId?: number; iat?: number };
+    if (!decoded.userId || !decoded.iat) return null;
+    if (Date.now() - decoded.iat > SESSION_TTL_MS) return null;
+    return decoded.userId;
+  } catch {
+    return null;
+  }
+};
+
+const getAuthUser = async (request: FastifyRequest) => {
+  const token = request.cookies?.[AUTH_COOKIE_NAME];
+  if (!token) return null;
+  const userId = verifySessionCookie(token);
+  if (!userId) return null;
+  const user = await db
+    .selectFrom('users')
+    .select(['id', 'email', 'createdAt'])
+    .where('id', '=', userId)
+    .executeTakeFirst();
+  return user ?? null;
+};
+
+const setAuthCookie = (reply: FastifyReply, userId: number) => {
+  const token = buildSessionCookie(userId);
+  reply.setCookie(AUTH_COOKIE_NAME, token, {
+    path: '/',
+    httpOnly: true,
+    sameSite: 'lax',
+    secure: IS_PROD,
+    maxAge: Math.floor(SESSION_TTL_MS / 1000)
+  });
+};
+
 fastify.get('/api/config', async () => ({
   baseUrl: baseUrl()
 }));
+
+fastify.post('/auth/register', async (request, reply) => {
+  const body = request.body as { email?: string; username?: string; password?: string } | undefined;
+  const identifier = body?.email ?? body?.username;
+  if (!identifier || typeof identifier !== 'string') {
+    return reply.code(400).send({ error: 'email_required' });
+  }
+  if (!body?.password || body.password.length < 6) {
+    return reply.code(400).send({ error: 'password_too_short' });
+  }
+  const normalized = identifier.trim().toLowerCase();
+  if (!normalized) {
+    return reply.code(400).send({ error: 'email_required' });
+  }
+  const existing = await db
+    .selectFrom('users')
+    .select('id')
+    .where('email', '=', normalized)
+    .executeTakeFirst();
+  if (existing) {
+    return reply.code(409).send({ error: 'email_taken' });
+  }
+  const now = new Date().toISOString();
+  const hash = await argon2.hash(body.password);
+  const result = await db
+    .insertInto('users')
+    .values({
+      email: normalized,
+      passwordHash: hash,
+      createdAt: now
+    })
+    .executeTakeFirstOrThrow();
+  const userId = Number(result.insertId);
+  const user = await db
+    .selectFrom('users')
+    .select(['id', 'email', 'createdAt'])
+    .where('id', '=', userId)
+    .executeTakeFirstOrThrow();
+  setAuthCookie(reply, user.id);
+  return { user };
+});
+
+fastify.post('/auth/login', async (request, reply) => {
+  const body = request.body as { email?: string; username?: string; password?: string } | undefined;
+  const identifier = body?.email ?? body?.username;
+  if (!identifier || typeof identifier !== 'string') {
+    return reply.code(400).send({ error: 'email_required' });
+  }
+  if (!body?.password) {
+    return reply.code(400).send({ error: 'password_required' });
+  }
+  const normalized = identifier.trim().toLowerCase();
+  const user = await db
+    .selectFrom('users')
+    .select(['id', 'email', 'passwordHash', 'createdAt'])
+    .where('email', '=', normalized)
+    .executeTakeFirst();
+  if (!user) {
+    return reply.code(401).send({ error: 'invalid_credentials' });
+  }
+  const ok = await argon2.verify(user.passwordHash, body.password);
+  if (!ok) {
+    return reply.code(401).send({ error: 'invalid_credentials' });
+  }
+  setAuthCookie(reply, user.id);
+  return { user: { id: user.id, email: user.email, createdAt: user.createdAt } };
+});
+
+fastify.post('/auth/logout', async (_request, reply) => {
+  reply.clearCookie(AUTH_COOKIE_NAME, { path: '/' });
+  return { ok: true };
+});
+
+fastify.get('/auth/me', async (request, reply) => {
+  const user = await getAuthUser(request);
+  if (!user) {
+    reply.clearCookie(AUTH_COOKIE_NAME, { path: '/' });
+  }
+  return { user };
+});
+
+fastify.get('/api/favorites', async (request, reply) => {
+  const user = await getAuthUser(request);
+  if (!user) {
+    return reply.code(401).send({ error: 'unauthorized' });
+  }
+  const favorites = await db
+    .selectFrom('favorites')
+    .select(['id', 'url', 'title', 'createdAt'])
+    .where('userId', '=', user.id)
+    .orderBy('createdAt', 'desc')
+    .execute();
+  return { favorites };
+});
+
+fastify.post('/api/favorites', async (request, reply) => {
+  const user = await getAuthUser(request);
+  if (!user) {
+    return reply.code(401).send({ error: 'unauthorized' });
+  }
+  const body = request.body as { url?: string; title?: string } | undefined;
+  const url = body?.url?.trim();
+  const title = body?.title?.trim();
+  if (!url || !title) {
+    return reply.code(400).send({ error: 'missing_fields' });
+  }
+  const now = new Date().toISOString();
+  const result = await db
+    .insertInto('favorites')
+    .values({
+      userId: user.id,
+      url,
+      title,
+      createdAt: now
+    })
+    .executeTakeFirstOrThrow();
+  const favoriteId = Number(result.insertId);
+  const favorite = await db
+    .selectFrom('favorites')
+    .select(['id', 'url', 'title', 'createdAt'])
+    .where('id', '=', favoriteId)
+    .executeTakeFirstOrThrow();
+  return { favorite };
+});
+
+fastify.delete('/api/favorites/:id', async (request, reply) => {
+  const user = await getAuthUser(request);
+  if (!user) {
+    return reply.code(401).send({ error: 'unauthorized' });
+  }
+  const { id } = request.params as { id: string };
+  const numericId = Number(id);
+  if (!Number.isFinite(numericId)) {
+    return reply.code(400).send({ error: 'invalid_id' });
+  }
+  const result = await db
+    .deleteFrom('favorites')
+    .where('id', '=', numericId)
+    .where('userId', '=', user.id)
+    .executeTakeFirst();
+  if (!result || result.numDeletedRows === 0n) {
+    return reply.code(404).send({ error: 'not_found' });
+  }
+  return { ok: true };
+});
 
 fastify.post(
   '/api/docs',
@@ -288,6 +494,46 @@ fastify.register(fastifyStatic, {
 });
 
 fastify.get('/', async (request, reply) => {
+  const indexPath = join(staticRoot, 'index.html');
+  try {
+    const html = await readFile(indexPath, 'utf8');
+    reply.type('text/html').send(html);
+  } catch {
+    reply.code(404).send('Client build not found');
+  }
+});
+
+fastify.get('/new', async (_request, reply) => {
+  const indexPath = join(staticRoot, 'index.html');
+  try {
+    const html = await readFile(indexPath, 'utf8');
+    reply.type('text/html').send(html);
+  } catch {
+    reply.code(404).send('Client build not found');
+  }
+});
+
+fastify.get('/home', async (_request, reply) => {
+  const indexPath = join(staticRoot, 'index.html');
+  try {
+    const html = await readFile(indexPath, 'utf8');
+    reply.type('text/html').send(html);
+  } catch {
+    reply.code(404).send('Client build not found');
+  }
+});
+
+fastify.get('/login', async (_request, reply) => {
+  const indexPath = join(staticRoot, 'index.html');
+  try {
+    const html = await readFile(indexPath, 'utf8');
+    reply.type('text/html').send(html);
+  } catch {
+    reply.code(404).send('Client build not found');
+  }
+});
+
+fastify.get('/register', async (_request, reply) => {
   const indexPath = join(staticRoot, 'index.html');
   try {
     const html = await readFile(indexPath, 'utf8');

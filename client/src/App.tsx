@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { EditorContent, useEditor } from '@tiptap/react';
-import toast, { Toaster } from 'react-hot-toast';
+import { toast, Toaster } from 'react-hot-toast';
 import StarterKit from '@tiptap/starter-kit';
 import Placeholder from '@tiptap/extension-placeholder';
 import Link from '@tiptap/extension-link';
@@ -12,7 +12,6 @@ import PasswordModal from './components/PasswordModal.js';
 import ExpiryModal from './components/ExpiryModal.js';
 import ShortcutsModal from './components/ShortcutsModal.js';
 import LinkModal from './components/LinkModal.js';
-import TextScaleControl from './components/TextScaleControl.js';
 
 const emptyDoc: JSONContent = {
   type: 'doc',
@@ -28,13 +27,123 @@ type DocResponse = {
 
 type DocStatus = 'loading' | 'ready' | 'password' | 'expired' | 'notfound' | 'error';
 
+type AuthUser = {
+  id: number;
+  email: string;
+  createdAt: string;
+};
+
+type FavoriteItem = {
+  id: number | string;
+  url: string;
+  title: string;
+  createdAt: string;
+  source: 'server' | 'local';
+};
+
+type FavoriteMeta = {
+  hasPassword?: boolean;
+  expiresAt?: string | null;
+};
+
+type Route =
+  | { kind: 'doc'; id?: string }
+  | { kind: 'login' }
+  | { kind: 'register' };
+
+const parseRoute = (path: string): Route => {
+  if (path === '/new') return { kind: 'doc' };
+  if (path === '/login') return { kind: 'login' };
+  if (path === '/register') return { kind: 'register' };
+  const match = path.match(/^\/d\/([A-Za-z0-9_-]+)$/);
+  if (match) return { kind: 'doc', id: match[1] };
+  return { kind: 'doc' };
+};
+
 const formatError = (error: unknown) => {
   if (error instanceof Error) return error.message;
   return 'Something went wrong.';
 };
 
+const extractTitleFromContent = (content: JSONContent | null | undefined) => {
+  const walk = (node: JSONContent | undefined): string | null => {
+    if (!node) return null;
+    if (node.type === 'heading' || node.type === 'paragraph') {
+      const text = node.content
+        ?.filter((child) => child.type === 'text' && typeof child.text === 'string')
+        .map((child) => child.text)
+        .join('')
+        .trim();
+      if (text) return text;
+    }
+    if (node.content && Array.isArray(node.content)) {
+      for (const child of node.content) {
+        const found = walk(child);
+        if (found) return found;
+      }
+    }
+    return null;
+  };
+  const title = walk(content ?? undefined);
+  if (!title) return null;
+  return title.length > 80 ? `${title.slice(0, 77)}…` : title;
+};
+
+const LOCAL_FAVORITES_KEY = 'pb_local_favorites';
+
+const normalizeUrl = (value: string) => {
+  const trimmed = value.trim();
+  if (!trimmed) return '';
+  try {
+    const url = new URL(trimmed, window.location.origin);
+    let href = url.href;
+    if (href.endsWith('/') && url.pathname !== '/') {
+      href = href.slice(0, -1);
+    }
+    return href;
+  } catch {
+    return trimmed;
+  }
+};
+
+const loadLocalFavorites = (): FavoriteItem[] => {
+  if (typeof window === 'undefined') return [];
+  try {
+    const raw = localStorage.getItem(LOCAL_FAVORITES_KEY);
+    if (!raw) return [];
+    const data = JSON.parse(raw) as Array<Partial<FavoriteItem>>;
+    if (!Array.isArray(data)) return [];
+    const results: FavoriteItem[] = [];
+    for (const item of data) {
+      const url = typeof item.url === 'string' ? item.url : '';
+      if (!url) continue;
+      results.push({
+        id: item.id ?? normalizeUrl(url),
+        url,
+        title: typeof item.title === 'string' ? item.title : 'Untitled',
+        createdAt: typeof item.createdAt === 'string' ? item.createdAt : new Date().toISOString(),
+        source: 'local'
+      });
+    }
+    return results;
+  } catch {
+    return [];
+  }
+};
+
+const saveLocalFavorites = (items: FavoriteItem[]) => {
+  if (typeof window === 'undefined') return;
+  const payload = items.map((item) => ({
+    id: item.id,
+    url: item.url,
+    title: item.title,
+    createdAt: item.createdAt
+  }));
+  localStorage.setItem(LOCAL_FAVORITES_KEY, JSON.stringify(payload));
+};
 
 const App = () => {
+  const [route, setRoute] = useState<Route>(() => parseRoute(window.location.pathname));
   const [docId, setDocId] = useState<string | null>(null);
   const [docStatus, setDocStatus] = useState<DocStatus>('loading');
   const [docContent, setDocContent] = useState<JSONContent>(emptyDoc);
@@ -57,6 +166,20 @@ const App = () => {
   const autosaveTimer = useRef<number | null>(null);
   const pendingSave = useRef(false);
   const [editorScale, setEditorScale] = useState(1);
+  const [authUser, setAuthUser] = useState<AuthUser | null>(null);
+  const [authLoading, setAuthLoading] = useState(false);
+  const [authError, setAuthError] = useState('');
+  const [authIdentifier, setAuthIdentifier] = useState('');
+  const [authPassword, setAuthPassword] = useState('');
+  const [authSubmitting, setAuthSubmitting] = useState(false);
+  const [favorites, setFavorites] = useState<FavoriteItem[]>([]);
+  const [favoritesLoading, setFavoritesLoading] = useState(false);
+  const [favoritesError, setFavoritesError] = useState('');
+  const [favoritesOpen, setFavoritesOpen] = useState(() => window.location.pathname === '/');
+  const [editingFavoriteId, setEditingFavoriteId] = useState<number | string | null>(null);
+  const [editingFavoriteTitle, setEditingFavoriteTitle] = useState('');
+  const [currentUrl, setCurrentUrl] = useState(() => window.location.href);
+  const [favoriteMeta, setFavoriteMeta] = useState<Record<string, FavoriteMeta>>({});
   const scaleMin = 0.8;
   const scaleMax = 1.6;
   const scaleStep = 0.1;
@@ -65,6 +188,26 @@ const App = () => {
     const platform = navigator.platform ?? '';
     return /Mac|iPhone|iPad|iPod/.test(platform) ? 'cmd' : 'ctrl';
   }, []);
+
+  const navigate = useCallback((path: string) => {
+    window.history.pushState(null, '', path);
+    setRoute(parseRoute(path));
+    if (path === '/') {
+      setFavoritesOpen(true);
+    }
+  }, []);
+
+  useEffect(() => {
+    const handlePop = () => {
+      setRoute(parseRoute(window.location.pathname));
+    };
+    window.addEventListener('popstate', handlePop);
+    return () => window.removeEventListener('popstate', handlePop);
+  }, []);
+
+  useEffect(() => {
+    setCurrentUrl(window.location.href);
+  }, [route, docId]);
 
   const editor = useEditor({
     extensions: [
@@ -191,6 +334,302 @@ const App = () => {
     }
   }, []);
 
+  const fetchMe = useCallback(async () => {
+    setAuthLoading(true);
+    setAuthError('');
+    try {
+      const res = await fetch('/auth/me');
+      if (!res.ok) {
+        setAuthUser(null);
+        return;
+      }
+      const data = (await res.json()) as { user: AuthUser | null };
+      setAuthUser(data.user ?? null);
+    } catch {
+      setAuthUser(null);
+    } finally {
+      setAuthLoading(false);
+    }
+  }, []);
+
+  const fetchServerFavorites = useCallback(async () => {
+    const res = await fetch('/api/favorites');
+    if (res.status === 401) return [];
+    if (!res.ok) {
+      throw new Error('Unable to load favorites.');
+    }
+    const data = (await res.json()) as { favorites: Array<Omit<FavoriteItem, 'source'>> };
+    return (data.favorites ?? []).map((favorite) => ({
+      ...favorite,
+      source: 'server' as const
+    }));
+  }, []);
+
+  const mergeLocalFavoritesToServer = useCallback(
+    async (serverFavorites: FavoriteItem[]) => {
+      const localFavorites = loadLocalFavorites();
+      if (!localFavorites.length) return false;
+      const serverUrls = new Set(serverFavorites.map((fav) => normalizeUrl(fav.url)));
+      const toUpload = localFavorites.filter(
+        (favorite) => !serverUrls.has(normalizeUrl(favorite.url))
+      );
+      if (!toUpload.length) {
+        localStorage.removeItem(LOCAL_FAVORITES_KEY);
+        return true;
+      }
+      for (const favorite of toUpload) {
+        const res = await fetch('/api/favorites', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ url: favorite.url, title: favorite.title })
+        });
+        if (!res.ok) {
+          return false;
+        }
+      }
+      localStorage.removeItem(LOCAL_FAVORITES_KEY);
+      return true;
+    },
+    []
+  );
+
+  const submitAuth = useCallback(async () => {
+    setAuthSubmitting(true);
+    setAuthError('');
+    try {
+      const endpoint = route.kind === 'register' ? '/auth/register' : '/auth/login';
+      const res = await fetch(endpoint, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: authIdentifier, password: authPassword })
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        setAuthError(body.error || 'Unable to sign in');
+        return;
+      }
+      const data = (await res.json()) as { user: AuthUser };
+      setAuthUser(data.user);
+      setAuthIdentifier('');
+      setAuthPassword('');
+      navigate('/');
+    } finally {
+      setAuthSubmitting(false);
+    }
+  }, [authIdentifier, authPassword, navigate, route.kind]);
+
+  const logout = useCallback(async () => {
+    await fetch('/auth/logout', { method: 'POST' });
+    setAuthUser(null);
+    setFavorites(loadLocalFavorites());
+  }, []);
+
+  const loadFavorites = useCallback(async () => {
+    setFavoritesLoading(true);
+    setFavoritesError('');
+    try {
+      if (!authUser) {
+        setFavorites(loadLocalFavorites());
+        return;
+      }
+      const serverFavorites = await fetchServerFavorites();
+      await mergeLocalFavoritesToServer(serverFavorites);
+      const refreshed = await fetchServerFavorites();
+      setFavorites(refreshed);
+    } catch (error) {
+      setFavoritesError(formatError(error));
+    } finally {
+      setFavoritesLoading(false);
+    }
+  }, [authUser, fetchServerFavorites, mergeLocalFavoritesToServer]);
+
+  useEffect(() => {
+    fetchMe().catch(() => {
+      // handled in fetchMe
+    });
+  }, [fetchMe]);
+
+  useEffect(() => {
+    if (route.kind === 'login' || route.kind === 'register') {
+      setAuthError('');
+    }
+  }, [route.kind]);
+
+  useEffect(() => {
+    loadFavorites().catch(() => {
+      // handled in loadFavorites
+    });
+  }, [authUser, loadFavorites]);
+
+  useEffect(() => {
+    if (window.location.pathname === '/') {
+      setFavoritesOpen(true);
+    }
+  }, []);
+
+  const addFavorite = useCallback(
+    async (url: string, title: string) => {
+      const normalizedUrl = normalizeUrl(url);
+      if (!normalizedUrl) return null;
+      const now = new Date().toISOString();
+      if (!authUser) {
+        const favorite: FavoriteItem = {
+          id: normalizedUrl,
+          url: normalizedUrl,
+          title,
+          createdAt: now,
+          source: 'local'
+        };
+        setFavorites((prev) => {
+          const next = [favorite, ...prev.filter((item) => normalizeUrl(item.url) !== normalizedUrl)];
+          saveLocalFavorites(next);
+          return next;
+        });
+        return favorite;
+      }
+      const res = await fetch('/api/favorites', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ title, url: normalizedUrl })
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        setFavoritesError(body.error || 'Unable to add favorite.');
+        return null;
+      }
+      const data = (await res.json()) as { favorite: Omit<FavoriteItem, 'source'> };
+      const favorite: FavoriteItem = { ...data.favorite, source: 'server' };
+      setFavorites((prev) => [favorite, ...prev.filter((item) => normalizeUrl(item.url) !== normalizedUrl)]);
+      return favorite;
+    },
+    [authUser]
+  );
+
+  const removeFavorite = useCallback(
+    async (favorite: FavoriteItem) => {
+      if (favorite.source === 'local' || !authUser) {
+        setFavorites((prev) => {
+          const next = prev.filter((item) => item.id !== favorite.id);
+          saveLocalFavorites(next);
+          return next;
+        });
+        return true;
+      }
+      const res = await fetch(`/api/favorites/${favorite.id}`, { method: 'DELETE' });
+      if (!res.ok) {
+        setFavoritesError('Unable to remove favorite.');
+        return false;
+      }
+      setFavorites((prev) => prev.filter((item) => item.id !== favorite.id));
+      return true;
+    },
+    [authUser]
+  );
+
+  const updateFavoriteTitle = useCallback(
+    async (favorite: FavoriteItem, title: string) => {
+      const trimmed = title.trim();
+      if (!trimmed) return;
+      if (favorite.source === 'local' || !authUser) {
+        setFavorites((prev) => {
+          const next = prev.map((item) =>
+            item.id === favorite.id ? { ...item, title: trimmed } : item
+          );
+          saveLocalFavorites(next);
+          return next;
+        });
+        return;
+      }
+      const created = await addFavorite(favorite.url, trimmed);
+      if (!created) return;
+      await removeFavorite(favorite);
+    },
+    [addFavorite, authUser, removeFavorite]
+  );
+
+  const normalizedCurrentUrl = useMemo(() => normalizeUrl(currentUrl), [currentUrl]);
+
+  const currentFavorite = useMemo(() => {
+    if (!normalizedCurrentUrl) return null;
+    return favorites.find((favorite) => normalizeUrl(favorite.url) === normalizedCurrentUrl) ?? null;
+  }, [favorites, normalizedCurrentUrl]);
+
+  const getDefaultFavoriteTitle = useCallback(() => {
+    if (route.kind === 'doc') {
+      const fromDoc = extractTitleFromContent(docContent);
+      if (fromDoc) return fromDoc;
+      if (docId) return `Paste ${docId}`;
+      return 'Untitled paste';
+    }
+    if (route.kind === 'login') return 'Login';
+    if (route.kind === 'register') return 'Register';
+    return 'Pastebin';
+  }, [docContent, docId, route.kind]);
+
+  const toggleFavorite = useCallback(async () => {
+    if (!normalizedCurrentUrl) return;
+    if (currentFavorite) {
+      await removeFavorite(currentFavorite);
+      toast.success('Removed from favorites');
+      return;
+    }
+    const title = getDefaultFavoriteTitle();
+    const created = await addFavorite(normalizedCurrentUrl, title);
+    if (created) {
+      const shouldAutoOpen =
+        route.kind !== 'doc' || !extractTitleFromContent(docContent);
+      if (shouldAutoOpen) {
+        setFavoritesOpen(true);
+        setEditingFavoriteId(created.id);
+        setEditingFavoriteTitle(created.title);
+      }
+      toast.success('Added to favorites');
+    }
+  }, [addFavorite, currentFavorite, getDefaultFavoriteTitle, normalizedCurrentUrl, removeFavorite]);
+
+  useEffect(() => {
+    if (!favoritesOpen) {
+      setEditingFavoriteId(null);
+      setEditingFavoriteTitle('');
+    }
+  }, [favoritesOpen]);
+
+  useEffect(() => {
+    if (!favoritesOpen || favorites.length === 0) return;
+    let active = true;
+    const fetchMeta = async () => {
+      const nextMeta: Record<string, FavoriteMeta> = {};
+      for (const favorite of favorites) {
+        try {
+          const url = new URL(favorite.url, window.location.origin);
+          if (url.origin !== window.location.origin) continue;
+          const match = url.pathname.match(/^\/d\/([A-Za-z0-9_-]+)$/);
+          if (!match) continue;
+          const res = await fetch(`/api/docs/${match[1]}`);
+          if (res.status === 401) {
+            nextMeta[favorite.id.toString()] = { hasPassword: true };
+            continue;
+          }
+          if (!res.ok) continue;
+          const data = (await res.json()) as { hasPassword?: boolean; expiresAt?: string | null };
+          nextMeta[favorite.id.toString()] = {
+            hasPassword: Boolean(data.hasPassword),
+            expiresAt: data.expiresAt ?? null
+          };
+        } catch {
+          // ignore metadata errors
+        }
+      }
+      if (active) {
+        setFavoriteMeta((prev) => ({ ...prev, ...nextMeta }));
+      }
+    };
+    fetchMeta();
+    return () => {
+      active = false;
+    };
+  }, [favorites, favoritesOpen]);
+
   const createDoc = useCallback(async (mode: 'replace' | 'new-window' = 'replace') => {
     if (mode === 'replace') {
       setDocStatus('loading');
@@ -209,13 +648,14 @@ const App = () => {
       return;
     }
     window.history.replaceState(null, '', `/d/${data.id}`);
+    setRoute({ kind: 'doc', id: data.id });
     setDocId(data.id);
     setDocContent(emptyDoc);
     setExpiresAt(null);
     setPassword('');
     setHasPassword(false);
     setDocStatus('ready');
-  }, []);
+  }, [setRoute]);
 
   const loadDoc = useCallback(
     async (id: string, providedPassword?: string) => {
@@ -384,24 +824,24 @@ const App = () => {
 
   useEffect(() => {
     fetchConfig();
-    const match = window.location.pathname.match(/^\/d\/([A-Za-z0-9_-]+)$/);
-    if (!match) {
+    if (route.kind !== 'doc') return;
+    if (!route.id) {
       createDoc().catch((error) => {
         setDocStatus('error');
         setErrorMessage(formatError(error));
       });
       return;
     }
-    const id = match[1];
+    const id = route.id;
     setDocId(id);
     loadDoc(id).catch((error) => {
       setDocStatus('error');
       setErrorMessage(formatError(error));
     });
-  }, [createDoc, fetchConfig, loadDoc]);
+  }, [createDoc, fetchConfig, loadDoc, route]);
 
   useEffect(() => {
-    if (!editor || docStatus !== 'ready') return;
+    if (!editor || docStatus !== 'ready' || route.kind !== 'doc') return;
     const handleUpdate = () => {
       if (autosaveTimer.current) {
         window.clearTimeout(autosaveTimer.current);
@@ -418,10 +858,11 @@ const App = () => {
         autosaveTimer.current = null;
       }
     };
-  }, [docStatus, editor, saveDoc]);
+  }, [docStatus, editor, route.kind, saveDoc]);
 
   useEffect(() => {
     const handler = (event: KeyboardEvent) => {
+      if (route.kind !== 'doc') return;
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 's') {
         event.preventDefault();
         saveDoc().catch((error) => setErrorMessage(formatError(error)));
@@ -479,26 +920,142 @@ const App = () => {
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, [decreaseScale, hasPassword, increaseScale, openLinkModal, resetScale, saveDoc]);
+  }, [decreaseScale, hasPassword, increaseScale, openLinkModal, resetScale, route.kind, saveDoc]);
 
   useEffect(() => {
-    if (!menuOpen) return;
+    if (!menuOpen || route.kind !== 'doc') return;
     generateQr().catch(() => {
       // ignore QR errors
     });
-  }, [generateQr, menuOpen]);
+  }, [generateQr, menuOpen, route.kind]);
 
-  const menuItems: SidebarItem[] = useMemo(
-    () => [
-      { label: 'New Doc', action: () => createDoc('new-window') },
-      { label: 'Copy Link', action: () => copyLink() },
-      { label: hasPassword ? 'Password Set' : 'Set Password', action: () => setPasswordModalOpen(true), disabled: hasPassword },
-      { label: 'Set Expiry', action: () => setExpiryModalOpen(true) },
-      { label: 'Shortcuts', action: () => setShortcutsOpen((open) => !open) }
-    ],
-    [copyLink, createDoc, hasPassword]
-  );
+  const menuItems: SidebarItem[] = useMemo(() => {
+    const items: SidebarItem[] = [
+      {
+        label: 'Favorites',
+        action: () => {
+          setFavoritesOpen(true);
+          setMenuOpen(false);
+        }
+      }
+    ];
+    if (route.kind === 'doc') {
+      items.push(
+        { label: 'New Doc', action: () => createDoc('replace') },
+        { label: 'Copy Link', action: () => copyLink(), disabled: !docId },
+        {
+          label: hasPassword ? 'Password Set' : 'Set Password',
+          action: () => setPasswordModalOpen(true),
+          disabled: hasPassword || !docId
+        },
+        { label: 'Set Expiry', action: () => setExpiryModalOpen(true), disabled: !docId },
+        { label: 'Shortcuts', action: () => setShortcutsOpen((open) => !open) }
+      );
+    }
+    if (authUser) {
+      items.push({
+        label: 'Log out',
+        action: () => logout().catch(() => null)
+      });
+    } else {
+      items.push(
+        { label: 'Log in', action: () => navigate('/login') },
+        { label: 'Register', action: () => navigate('/register') }
+      );
+    }
+    return items;
+  }, [
+    authUser,
+    copyLink,
+    createDoc,
+    docId,
+    hasPassword,
+    logout,
+    navigate,
+    route.kind
+  ]);
 
+
+  if (route.kind === 'login' || route.kind === 'register') {
+    const heading = route.kind === 'register' ? 'Create account' : 'Welcome back';
+    const cta = route.kind === 'register' ? 'Create account' : 'Log in';
+    const switchPath = route.kind === 'register' ? '/login' : '/register';
+    const switchLabel =
+      route.kind === 'register' ? 'Already have an account?' : 'Need an account?';
+    const switchAction = route.kind === 'register' ? 'Log in' : 'Register';
+
+    return (
+      <div className="min-h-screen bg-black text-white">
+        <div className="mx-auto flex min-h-screen max-w-md flex-col justify-center px-6 py-10">
+          <button
+            className="mb-6 text-xs uppercase tracking-[0.2em] text-neutral-500"
+            onClick={() => navigate('/')}
+          >
+            ← Back
+          </button>
+          <div className="rounded-2xl border border-neutral-800 bg-neutral-950/70 p-6 shadow-lg">
+            <div className="space-y-2">
+              <div className="text-xs uppercase tracking-[0.25em] text-neutral-500">
+                Minimal Auth
+              </div>
+              <h1 className="text-2xl font-semibold">{heading}</h1>
+              <p className="text-sm text-neutral-400">
+                Use your email to sync favourites between devices.
+              </p>
+            </div>
+            <form
+              className="mt-6 space-y-4"
+              onSubmit={(event) => {
+                event.preventDefault();
+                submitAuth().catch((error) => setAuthError(formatError(error)));
+              }}
+            >
+              <div className="space-y-2">
+                <label className="text-xs uppercase tracking-[0.2em] text-neutral-500">
+                  Email
+                </label>
+                <input
+                  type="email"
+                  value={authIdentifier}
+                  onChange={(event) => setAuthIdentifier(event.target.value)}
+                  className="w-full rounded-md border border-neutral-800 bg-black px-3 py-2 text-sm text-white"
+                  autoFocus
+                />
+              </div>
+              <div className="space-y-2">
+                <label className="text-xs uppercase tracking-[0.2em] text-neutral-500">
+                  Password
+                </label>
+                <input
+                  type="password"
+                  value={authPassword}
+                  onChange={(event) => setAuthPassword(event.target.value)}
+                  className="w-full rounded-md border border-neutral-800 bg-black px-3 py-2 text-sm text-white"
+                />
+              </div>
+              {authError && <div className="text-xs text-red-400">{authError}</div>}
+              <button
+                type="submit"
+                disabled={authSubmitting}
+                className="w-full rounded-md border border-neutral-600 px-4 py-2 text-xs uppercase tracking-[0.3em] text-neutral-200 disabled:opacity-50"
+              >
+                {authSubmitting ? 'Working...' : cta}
+              </button>
+            </form>
+            <div className="mt-6 flex items-center justify-between text-xs text-neutral-500">
+              <span>{switchLabel}</span>
+              <button
+                className="uppercase tracking-[0.25em] text-neutral-200"
+                onClick={() => navigate(switchPath)}
+              >
+                {switchAction}
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   if (docStatus === 'expired') {
     return (
@@ -559,14 +1116,53 @@ const App = () => {
             passwordSet={Boolean(password)}
             menuOpen={menuOpen}
             onMenuToggle={() => setMenuOpen((open) => !open)}
-            scaleControl={
-              <TextScaleControl
-                scale={editorScale}
-                min={scaleMin}
-                max={scaleMax}
-                step={scaleStep}
-                onChange={persistScale}
-              />
+            leftActions={
+              <div className="flex items-center gap-0">
+                <button
+                  className="flex h-8 w-8 items-center justify-center text-neutral-200"
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    toggleFavorite().catch(() => null);
+                  }}
+                  aria-label={currentFavorite ? 'Remove favorite' : 'Add favorite'}
+                  type="button"
+                >
+                  <svg
+                    width="16"
+                    height="16"
+                    viewBox="0 0 24 24"
+                    fill={currentFavorite ? 'currentColor' : 'none'}
+                  >
+                    <path
+                      d="M12 17.3l-5.2 3 1.2-5.9-4.4-4.2 6-.7L12 4l2.4 5.5 6 .7-4.4 4.2 1.2 5.9z"
+                      stroke="currentColor"
+                      strokeWidth="1.5"
+                      strokeLinejoin="round"
+                    />
+                  </svg>
+                </button>
+                {authUser ? (
+                  <button
+                    className="flex h-8 w-8 items-center justify-center text-neutral-400 transition-colors hover:text-white"
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      setMenuOpen((open) => !open);
+                    }}
+                    aria-label="Open account menu"
+                    type="button"
+                  >
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
+                      <circle cx="12" cy="8" r="3.5" stroke="currentColor" strokeWidth="1.4" />
+                      <path
+                        d="M5 19.5c1.6-3.2 4.1-4.8 7-4.8s5.4 1.6 7 4.8"
+                        stroke="currentColor"
+                        strokeWidth="1.4"
+                        strokeLinecap="round"
+                      />
+                    </svg>
+                  </button>
+                ) : null}
+              </div>
             }
           />
         </div>
@@ -584,11 +1180,204 @@ const App = () => {
         {errorMessage && <div className="mt-2 text-xs text-red-400">{errorMessage}</div>}
       </div>
 
+      {favoritesOpen && (
+        <div
+          className="fixed inset-0 z-30 flex items-start justify-center bg-black/70 backdrop-blur-sm"
+          onClick={() => setFavoritesOpen(false)}
+          role="button"
+          tabIndex={-1}
+        >
+          <div
+            className="mt-16 w-full max-w-2xl px-4"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="p-6 text-white">
+              <div className="flex items-center justify-between">
+                <div>
+                  <div className="text-xs uppercase tracking-[0.25em] text-neutral-500">
+                    {authUser ? 'Favorites' : 'Favorites (local)'}
+                  </div>
+                  <div className="text-lg font-semibold text-white">Saved links</div>
+                </div>
+                <button
+                  className="rounded-full border border-neutral-700 p-2 text-neutral-300"
+                  onClick={() => setFavoritesOpen(false)}
+                  aria-label="Close favorites"
+                  type="button"
+                >
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
+                    <path
+                      d="M6 6l12 12M18 6l-12 12"
+                      stroke="currentColor"
+                      strokeWidth="1.5"
+                      strokeLinecap="round"
+                    />
+                  </svg>
+                </button>
+              </div>
+
+              <div className="mt-4 space-y-3 text-sm text-neutral-400">
+                {authLoading && authUser ? (
+                  <div className="text-xs uppercase tracking-[0.2em] text-neutral-500">
+                    Checking session...
+                  </div>
+                ) : null}
+                {!authUser && (
+                  <div className="flex flex-wrap gap-2">
+                    <button
+                      className="rounded-md border border-neutral-700 px-3 py-2 text-xs uppercase tracking-[0.3em] text-neutral-200"
+                      onClick={() => {
+                        setFavoritesOpen(false);
+                        navigate('/login');
+                      }}
+                    >
+                      Log in
+                    </button>
+                    <button
+                      className="rounded-md border border-neutral-700 px-3 py-2 text-xs uppercase tracking-[0.3em] text-neutral-200"
+                      onClick={() => {
+                        setFavoritesOpen(false);
+                        navigate('/register');
+                      }}
+                    >
+                      Register
+                    </button>
+                  </div>
+                )}
+                {favoritesError && <div className="text-xs text-red-400">{favoritesError}</div>}
+              </div>
+
+              <div className="mt-4 max-h-[60vh] space-y-3 overflow-y-auto pr-1">
+                {favoritesLoading ? (
+                  <div className="text-xs uppercase tracking-[0.2em] text-neutral-500">
+                    Loading...
+                  </div>
+                ) : favorites.length === 0 ? (
+                  <div className="text-sm text-neutral-500">No favorites yet.</div>
+                ) : (
+                  favorites.map((favorite) => {
+                    const isEditing = editingFavoriteId === favorite.id;
+                    const meta = favoriteMeta[favorite.id.toString()];
+                    return (
+                      <div
+                        key={favorite.id}
+                        className="flex flex-col gap-3 rounded-xl border border-neutral-800 bg-black/40 p-4 sm:flex-row sm:items-center sm:justify-between"
+                      >
+                        <div className="space-y-2">
+                          {isEditing ? (
+                            <input
+                              value={editingFavoriteTitle}
+                              onChange={(event) => setEditingFavoriteTitle(event.target.value)}
+                              className="w-full rounded-md border border-neutral-800 bg-black px-3 py-2 text-sm text-white"
+                              autoFocus
+                            />
+                          ) : (
+                            <button
+                              className="text-left text-sm font-medium text-white"
+                              onClick={() => {
+                                setFavoritesOpen(false);
+                                window.location.href = favorite.url;
+                              }}
+                              type="button"
+                            >
+                              {favorite.title}
+                            </button>
+                          )}
+                          {(meta?.hasPassword || meta?.expiresAt) && (
+                            <div className="flex flex-wrap items-center gap-3 text-xs text-neutral-400">
+                              {meta?.hasPassword && (
+                                <span className="inline-flex items-center gap-1">
+                                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none">
+                                    <path
+                                      d="M7 10V7a5 5 0 0 1 10 0v3"
+                                      stroke="currentColor"
+                                      strokeWidth="1.5"
+                                      strokeLinecap="round"
+                                    />
+                                    <rect
+                                      x="5"
+                                      y="10"
+                                      width="14"
+                                      height="10"
+                                      rx="2"
+                                      stroke="currentColor"
+                                      strokeWidth="1.5"
+                                    />
+                                  </svg>
+                                  Locked
+                                </span>
+                              )}
+                              {meta?.expiresAt && (
+                                <span>Expires {new Date(meta.expiresAt).toLocaleString()}</span>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                        <div className="flex flex-wrap gap-2">
+                          {isEditing ? (
+                            <>
+                              <button
+                                className="rounded-md border border-neutral-700 px-3 py-2 text-xs uppercase tracking-[0.3em] text-neutral-200"
+                                onClick={() => {
+                                  updateFavoriteTitle(favorite, editingFavoriteTitle).catch(() => null);
+                                  setEditingFavoriteId(null);
+                                  setEditingFavoriteTitle('');
+                                }}
+                              >
+                                Save
+                              </button>
+                              <button
+                                className="rounded-md border border-transparent px-3 py-2 text-xs uppercase tracking-[0.3em] text-neutral-500"
+                                onClick={() => {
+                                  setEditingFavoriteId(null);
+                                  setEditingFavoriteTitle('');
+                                }}
+                              >
+                                Cancel
+                              </button>
+                            </>
+                          ) : (
+                            <>
+                              <button
+                                className="rounded-md border border-neutral-700 px-3 py-2 text-xs uppercase tracking-[0.3em] text-neutral-200"
+                                onClick={() => {
+                                  setEditingFavoriteId(favorite.id);
+                                  setEditingFavoriteTitle(favorite.title);
+                                }}
+                              >
+                                Edit
+                              </button>
+                              <button
+                                className="rounded-md border border-neutral-700 px-3 py-2 text-xs uppercase tracking-[0.3em] text-neutral-200"
+                                onClick={() => removeFavorite(favorite).catch(() => null)}
+                              >
+                                Remove
+                              </button>
+                            </>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       <Sidebar
         open={menuOpen}
         items={menuItems}
         qrDataUrl={qrDataUrl}
         onClose={() => setMenuOpen(false)}
+        footer={
+          authUser ? (
+            <div className="mt-4 border-t border-neutral-900 pt-4 text-center text-[10px] uppercase tracking-[0.2em] text-neutral-500">
+              {authUser.email}
+            </div>
+          ) : null
+        }
       />
       <Toaster
         position="top-right"

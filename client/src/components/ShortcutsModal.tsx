@@ -11,10 +11,10 @@ const ShortcutsModal = ({ open, modKey, onClose }: ShortcutsModalProps) => {
     'inline-flex min-w-[2.75rem] items-center justify-center rounded border border-neutral-700 bg-neutral-900 px-2 py-1 text-[10px] uppercase tracking-widest text-neutral-400';
 
   return (
-    <div className="fixed inset-0 flex items-center justify-center bg-black/70">
-      <div className="w-full max-w-xl max-h-[90vh] rounded-lg border border-neutral-800 bg-neutral-950 p-6 space-y-4">
-        <div className="text-xs uppercase tracking-widest text-neutral-400">Shortcuts</div>
-        <div className="grid gap-6 text-sm text-neutral-300 md:grid-cols-2">
+    <div className="fixed inset-0 flex items-center justify-center bg-black/70 backdrop-blur-sm">
+      <div className="w-full max-w-xl max-h-[90vh] p-6 space-y-4 text-white">
+        <div className="text-xs uppercase tracking-widest text-white/80">Shortcuts</div>
+        <div className="grid gap-6 text-sm text-neutral-200 md:grid-cols-2">
           <div className="space-y-3">
             <div className="text-xs uppercase tracking-widest text-neutral-500">App shortcuts</div>
             <div className="flex items-center justify-between">

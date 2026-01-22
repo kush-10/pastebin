@@ -19,6 +19,17 @@ body {
   font-size: calc(1rem * var(--editor-scale, 1));
 }
 
+.editor-shell {
+  border: none;
+  box-shadow: none;
+  background: transparent;
+}
+
+.tiptap:focus-visible {
+  outline: none;
+  box-shadow: inset 0 -1px 0 rgba(255, 255, 255, 0.18);
+}
+
 .tiptap h1 {
   font-size: calc(2.25rem * var(--editor-scale, 1));
   line-height: calc(2.5rem * var(--editor-scale, 1));
@@ -101,6 +112,11 @@ body {
   font-size: 0.95em;
 }
 
+.tiptap p {
+  border: none;
+  box-shadow: none;
+}
+
 .tiptap a {
   color: #9ad0ff;
   text-decoration: underline;
@@ -121,10 +137,9 @@ body {
   gap: 0.5rem;
   padding: 0.35rem 0.6rem;
   border-radius: 999px;
-  background: rgba(20, 20, 20, 0.72);
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.35);
-  backdrop-filter: blur(10px);
+  background: transparent;
+  box-shadow: none;
+  backdrop-filter: none;
 }
 
 .text-scale-value {

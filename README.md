@@ -31,7 +31,7 @@ Create disposable notes, share via short URLs, and optionally lock with a one-ti
 
 ## Running using Docker Compose locally
 
-1. Copy `.env.example` to `.env` and update `APP_BASE_URL`/`PORT`.
+1. Copy `.env.example` to `.env` and update `APP_BASE_URL`/`PORT` (and set `AUTH_SECRET` for stable logins).
 2. Build and start: `docker compose up --build -d`.
 3. Access the UI at `http://localhost:5173` (dev) or `http://localhost:3123` (API).
 4. API entry points: `POST /api/docs`, `GET /api/docs/:id`, `PUT /api/docs/:id`.

@@ -10,16 +10,16 @@ const PasswordModal = ({ open, password, onPasswordChange, onSave, onClose }: Pa
   if (!open) return null;
   return (
     <div
-      className="fixed inset-0 flex items-center justify-center bg-black/70"
+      className="fixed inset-0 flex items-center justify-center bg-black/70 backdrop-blur-sm"
       onClick={onClose}
       role="button"
       tabIndex={-1}
     >
       <div
-        className="w-full max-w-sm rounded-lg border border-neutral-800 bg-neutral-950 p-6 space-y-4"
+        className="w-full max-w-sm p-6 space-y-4 text-white"
         onClick={(event) => event.stopPropagation()}
       >
-        <div className="text-xs uppercase tracking-widest text-neutral-400">Set password</div>
+        <div className="text-xs uppercase tracking-widest text-white/80">Set password</div>
         <input
           type="password"
           placeholder="Password (cannot be changed)"

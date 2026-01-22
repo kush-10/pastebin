@@ -20,16 +20,16 @@ const ExpiryModal = ({
   if (!open) return null;
   return (
     <div
-      className="fixed inset-0 flex items-center justify-center bg-black/70"
+      className="fixed inset-0 flex items-center justify-center bg-black/70 backdrop-blur-sm"
       onClick={onClose}
       role="button"
       tabIndex={-1}
     >
       <div
-        className="w-full max-w-sm rounded-lg border border-neutral-800 bg-neutral-950 p-6 space-y-4"
+        className="w-full max-w-sm p-6 space-y-4 text-white"
         onClick={(event) => event.stopPropagation()}
       >
-        <div className="text-xs uppercase tracking-widest text-neutral-400">Set expiry</div>
+        <div className="text-xs uppercase tracking-widest text-white/80">Set expiry</div>
         <select
           className="w-full rounded-md bg-neutral-900 border border-neutral-700 px-3 py-2 text-sm text-white"
           value={expiryPreset}
