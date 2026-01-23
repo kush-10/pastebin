@@ -862,6 +862,18 @@ const App = () => {
 
   useEffect(() => {
     const handler = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        setMenuOpen(false);
+        setPasswordModalOpen(false);
+        setExpiryModalOpen(false);
+        setShortcutsOpen(false);
+        setLinkModalOpen(false);
+        setFavoritesOpen(false);
+        setEditingFavoriteId(null);
+        setEditingFavoriteTitle('');
+        return;
+      }
       if (route.kind !== 'doc') return;
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 's') {
         event.preventDefault();
@@ -909,13 +921,6 @@ const App = () => {
       if ((event.metaKey || event.ctrlKey) && event.shiftKey && event.key.toLowerCase() === 'e') {
         event.preventDefault();
         setExpiryModalOpen((open) => !open);
-      }
-      if (event.key === 'Escape') {
-        setMenuOpen(false);
-        setPasswordModalOpen(false);
-        setExpiryModalOpen(false);
-        setShortcutsOpen(false);
-        setLinkModalOpen(false);
       }
     };
     window.addEventListener('keydown', handler);
